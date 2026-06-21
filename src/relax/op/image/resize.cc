@@ -392,35 +392,39 @@ StructInfo InferStructInfoAffineGrid(const Call& call, const BlockBuilder& ctx) 
         << "AffineGrid expects the target size to be a Shape, while the given one is "
         << call->args[1]->GetTypeKey();
   }
-  if (size_sinfo->ndim != 2) {
+  if (size_sinfo->ndim != 2 && size_sinfo->ndim != 3) {
     TVM_FFI_VISIT_THROW(ValueError, call)
-        << "AffineGrid expects the target size to be a 2-dim shape, while the given "
+        << "AffineGrid expects the target size to be a 2-dim or 3-dim shape, while the given "
            "one has ndim "
         << size_sinfo->ndim;
   }
+  const int64_t spatial_ndim = size_sinfo->ndim;
 
-  // data should be 3-D: [batch, 2, 3]
+  // data should be 3-D: [batch, 2, 3] for 2D or [batch, 3, 4] for 3D.
   if (data_sinfo->ndim != -1 && data_sinfo->ndim != 3) {
     TVM_FFI_VISIT_THROW(ValueError, call)
-        << "AffineGrid expects the input data to be 3-D (batch, 2, 3), but got ndim "
+        << "AffineGrid expects the input data to be 3-D (batch, 2, 3) or (batch, 3, 4), "
+           "but got ndim "
         << data_sinfo->ndim;
   }
 
   const auto* data_shape = data_sinfo->shape.as<ShapeExprNode>();
   if (data_shape != nullptr) {
-    // Check that the affine matrix has shape [batch, 2, 3]
+    // Check that the affine matrix has rank-appropriate shape.
     if (data_shape->values.size() >= 2) {
       auto* dim1 = data_shape->values[1].as<IntImmNode>();
-      if (dim1 != nullptr && dim1->value != 2) {
+      if (dim1 != nullptr && dim1->value != spatial_ndim) {
         TVM_FFI_VISIT_THROW(ValueError, call)
-            << "AffineGrid expects the second dimension of input to be 2, but got " << dim1->value;
+            << "AffineGrid expects the second dimension of input to be " << spatial_ndim
+            << ", but got " << dim1->value;
       }
     }
     if (data_shape->values.size() >= 3) {
       auto* dim2 = data_shape->values[2].as<IntImmNode>();
-      if (dim2 != nullptr && dim2->value != 3) {
+      if (dim2 != nullptr && dim2->value != spatial_ndim + 1) {
         TVM_FFI_VISIT_THROW(ValueError, call)
-            << "AffineGrid expects the third dimension of input to be 3, but got " << dim2->value;
+            << "AffineGrid expects the third dimension of input to be " << spatial_ndim + 1
+            << ", but got " << dim2->value;
       }
     }
   }
@@ -428,15 +432,16 @@ StructInfo InferStructInfoAffineGrid(const Call& call, const BlockBuilder& ctx) 
   DataType out_dtype = data_sinfo->dtype;
 
   if (data_shape == nullptr || size_value == nullptr) {
-    return TensorStructInfo(out_dtype, /*ndim=*/4, data_sinfo->vdevice);
+    return TensorStructInfo(out_dtype, /*ndim=*/spatial_ndim + 2, data_sinfo->vdevice);
   }
 
-  // Output shape: [batch, 2, target_height, target_width]
+  // Output shape: [batch, spatial_ndim, *target_shape]
   ffi::Array<PrimExpr> out_shape;
-  out_shape.push_back(data_shape->values[0]);  // batch
-  out_shape.push_back(IntImm::Int64(2));       // 2 (spatial dimensions)
-  out_shape.push_back(size_value->values[0]);  // target_height
-  out_shape.push_back(size_value->values[1]);  // target_width
+  out_shape.push_back(data_shape->values[0]);
+  out_shape.push_back(IntImm::Int64(spatial_ndim));
+  for (const PrimExpr& extent : size_value->values) {
+    out_shape.push_back(extent);
+  }
 
   return TensorStructInfo(ShapeExpr(out_shape), out_dtype, data_sinfo->vdevice);
 }
@@ -445,7 +450,7 @@ TVM_REGISTER_OP("relax.image.affine_grid")
     .set_attrs_type<AffineGridAttrs>()
     .set_num_inputs(2)
     .add_argument("data", "Tensor", "The input affine matrix tensor.")
-    .add_argument("size", "Shape", "The target output shape (H, W).")
+    .add_argument("size", "Shape", "The target output shape (H, W) or (D, H, W).")
     .set_attr<FInferStructInfo>("FInferStructInfo", InferStructInfoAffineGrid)
     .set_attr<TMixedPrecisionPolicy>("TMixedPrecisionPolicy", MixedPrecisionPolicyKind::kFollow)
     .set_attr<bool>("FPurity", true);

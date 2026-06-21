@@ -21,7 +21,7 @@ from tvm import te, tirx
 
 
 def affine_grid(data, target_shape, align_corners=True):
-    """affine_grid operator that generates 2D sampling grid.
+    """affine_grid operator that generates 2D or 3D sampling grid.
 
     This operation is described in https://arxiv.org/pdf/1506.02025.pdf. It generates a uniform
     sampling grid within the target shape and normalizes it to [-1, 1]. The provided affine
@@ -30,10 +30,10 @@ def affine_grid(data, target_shape, align_corners=True):
     Parameters
     ----------
     data : tvm.Tensor
-        3-D with shape [batch, 2, 3]. The affine matrix.
+        3-D with shape [batch, 2, 3] or [batch, 3, 4]. The affine matrix.
 
-    target_shape: list/tuple of two int
-        Specifies the output shape (H, W).
+    target_shape: list/tuple of two or three int
+        Specifies the output shape (H, W) or (D, H, W).
 
     align_corners : bool
         If true, -1 and 1 refer to the centers of the corner output pixels.
@@ -42,15 +42,41 @@ def affine_grid(data, target_shape, align_corners=True):
     Returns
     -------
     Output : tvm.Tensor
-        4-D with shape [batch, 2, target_height, target_width]
+        4-D with shape [batch, 2, target_height, target_width] or 5-D with
+        shape [batch, 3, target_depth, target_height, target_width].
     """
     assert target_shape is not None
-    assert len(target_shape) == 2
-    assert target_shape[0] > 1 and target_shape[1] > 1, (
-        "target height/width should be greater than 1"
+    assert len(target_shape) in (2, 3)
+    assert all(dim > 1 for dim in target_shape), (
+        "target spatial dimensions should be greater than 1"
     )
 
     dtype = data.dtype
+    if len(target_shape) == 3:
+        if align_corners:
+            z_step = tirx.const((2.0 - 1e-7) / (target_shape[0] - 1), dtype=dtype)
+            y_step = tirx.const((2.0 - 1e-7) / (target_shape[1] - 1), dtype=dtype)
+            x_step = tirx.const((2.0 - 1e-7) / (target_shape[2] - 1), dtype=dtype)
+            z_start = tirx.const(-1.0, dtype=dtype)
+            y_start = tirx.const(-1.0, dtype=dtype)
+            x_start = tirx.const(-1.0, dtype=dtype)
+        else:
+            z_step = tirx.const(2.0 / target_shape[0], dtype=dtype)
+            y_step = tirx.const(2.0 / target_shape[1], dtype=dtype)
+            x_step = tirx.const(2.0 / target_shape[2], dtype=dtype)
+            z_start = tirx.const((1.0 / target_shape[0]) - 1.0, dtype=dtype)
+            y_start = tirx.const((1.0 / target_shape[1]) - 1.0, dtype=dtype)
+            x_start = tirx.const((1.0 / target_shape[2]) - 1.0, dtype=dtype)
+
+        def _compute_3d(n, dim, k, i, j):
+            z = z_start + k * z_step
+            y = y_start + i * y_step
+            x = x_start + j * x_step
+            return data[n, dim, 0] * x + data[n, dim, 1] * y + data[n, dim, 2] * z + data[n, dim, 3]
+
+        oshape = (data.shape[0], len(target_shape), *target_shape)
+        return te.compute(oshape, _compute_3d, tag="affine_grid")
+
     if align_corners:
         y_step = tirx.const((2.0 - 1e-7) / (target_shape[0] - 1), dtype=dtype)
         x_step = tirx.const((2.0 - 1e-7) / (target_shape[1] - 1), dtype=dtype)

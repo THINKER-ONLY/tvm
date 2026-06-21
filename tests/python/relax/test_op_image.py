@@ -374,6 +374,7 @@ def test_affine_grid_infer_struct_info():
     x2 = relax.Var("x", R.Tensor("float32", ndim=3))
     x3 = relax.Var("x", R.Tensor("float32"))
     x4 = relax.Var("x", R.Tensor(ndim=3))
+    x5 = relax.Var("x", R.Tensor((2, 3, 4), "float32"))
 
     _check_inference(
         bb,
@@ -407,6 +408,11 @@ def test_affine_grid_infer_struct_info():
     )
     _check_inference(
         bb,
+        relax.op.image.affine_grid(x2, size=(4, 8, 12)),
+        relax.TensorStructInfo(dtype="float32", ndim=5),
+    )
+    _check_inference(
+        bb,
         relax.op.image.affine_grid(x3, size=(16, 16)),
         relax.TensorStructInfo(dtype="float32", ndim=4),
     )
@@ -414,6 +420,11 @@ def test_affine_grid_infer_struct_info():
         bb,
         relax.op.image.affine_grid(x4, size=(16, 16)),
         relax.TensorStructInfo(dtype="", ndim=4),
+    )
+    _check_inference(
+        bb,
+        relax.op.image.affine_grid(x5, size=(4, 8, 12)),
+        relax.TensorStructInfo((2, 3, 4, 8, 12), "float32"),
     )
 
 
@@ -423,11 +434,18 @@ def test_affine_grid_infer_struct_info_shape_symbolic():
     oh = tirx.Var("oh", "int64")
     ow = tirx.Var("ow", "int64")
     x0 = relax.Var("x", R.Tensor((n, 2, 3), "float32"))
+    od = tirx.Var("od", "int64")
+    x1 = relax.Var("x", R.Tensor((n, 3, 4), "float32"))
 
     _check_inference(
         bb,
         relax.op.image.affine_grid(x0, size=(oh, ow)),
         relax.TensorStructInfo((n, 2, oh, ow), "float32"),
+    )
+    _check_inference(
+        bb,
+        relax.op.image.affine_grid(x1, size=(od, oh, ow)),
+        relax.TensorStructInfo((n, 3, od, oh, ow), "float32"),
     )
 
 
@@ -447,11 +465,17 @@ def test_affine_grid_wrong_input_ndim():
     bb = relax.BlockBuilder()
     x0 = relax.Var("x", R.Tensor((2, 3, 32, 32), "float32"))
     x1 = relax.Var("x", R.Tensor("float32", ndim=4))
+    x2 = relax.Var("x", R.Tensor((2, 2, 3), "float32"))
+    x3 = relax.Var("x", R.Tensor((2, 3, 4), "float32"))
 
     with pytest.raises(ValueError):
         bb.normalize(relax.op.image.affine_grid(x0, size=(16, 16)))
     with pytest.raises(ValueError):
         bb.normalize(relax.op.image.affine_grid(x1, size=(16, 16)))
+    with pytest.raises(ValueError):
+        bb.normalize(relax.op.image.affine_grid(x2, size=(16, 16, 16)))
+    with pytest.raises(ValueError):
+        bb.normalize(relax.op.image.affine_grid(x3, size=(16, 16)))
 
 
 def test_affine_grid_wrong_size_ndim():
@@ -459,9 +483,9 @@ def test_affine_grid_wrong_size_ndim():
     x0 = relax.Var("x", R.Tensor((2, 2, 3), "float32"))
 
     with pytest.raises(ValueError):
-        bb.normalize(relax.op.image.affine_grid(x0, (16, 16, 16)))
-    with pytest.raises(ValueError):
         bb.normalize(relax.op.image.affine_grid(x0, (16,)))
+    with pytest.raises(ValueError):
+        bb.normalize(relax.op.image.affine_grid(x0, (16, 16, 16, 16)))
 
 
 @pytest.mark.parametrize(
@@ -497,6 +521,33 @@ def test_affine_grid_e2e(batch, target_h, target_w, align_corners):
     ref_np = tvm.topi.testing.affine_grid_python(
         theta_np, (target_h, target_w), align_corners=align_corners
     )
+
+    tvm.testing.assert_allclose(out_np, ref_np, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("align_corners", [True, False])
+def test_affine_grid_3d_e2e(align_corners):
+    """End-to-end numerical correctness test for 3D affine grids."""
+
+    @tvm.script.ir_module
+    class AffineGridModule:
+        @R.function
+        def main(theta: R.Tensor(("batch", 3, 4), "float32")) -> R.Tensor("float32", ndim=5):
+            gv = R.image.affine_grid(theta, size=(4, 5, 6), align_corners=align_corners)
+            return gv
+
+    target = "llvm"
+    dev = tvm.cpu()
+    exe = tvm.compile(AffineGridModule, target=target)
+    vm = relax.VirtualMachine(exe, dev)
+
+    theta_np = np.random.uniform(-1, 1, size=(2, 3, 4)).astype("float32")
+    theta_nd = tvm.runtime.tensor(theta_np, dev)
+
+    out_nd = vm["main"](theta_nd)
+    out_np = out_nd.numpy()
+
+    ref_np = tvm.topi.testing.affine_grid_python(theta_np, (4, 5, 6), align_corners=align_corners)
 
     tvm.testing.assert_allclose(out_np, ref_np, rtol=1e-5, atol=1e-5)
 

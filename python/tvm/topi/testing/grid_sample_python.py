@@ -23,16 +23,36 @@ import numpy as np
 
 
 def affine_grid_python(data, target_shape, align_corners=True):
-    yv, xv = np.meshgrid(np.arange(target_shape[0]), np.arange(target_shape[1]))
+    assert len(target_shape) in (2, 3)
+    if len(target_shape) == 2:
+        yv, xv = np.meshgrid(np.arange(target_shape[0]), np.arange(target_shape[1]))
+        if align_corners:
+            yv = yv.T * 2 / (target_shape[0] - 1) - 1
+            xv = xv.T * 2 / (target_shape[1] - 1) - 1
+        else:
+            yv = (yv.T * 2 + 1) / target_shape[0] - 1
+            xv = (xv.T * 2 + 1) / target_shape[1] - 1
+        ones = np.ones_like(xv)
+        grid = np.stack([xv, yv, ones]).reshape(3, -1)
+        return data.reshape(-1, 3).dot(grid).reshape(data.shape[0], 2, *target_shape)
+
+    zv, yv, xv = np.meshgrid(
+        np.arange(target_shape[0]),
+        np.arange(target_shape[1]),
+        np.arange(target_shape[2]),
+        indexing="ij",
+    )
     if align_corners:
-        yv = yv.T * 2 / (target_shape[0] - 1) - 1
-        xv = xv.T * 2 / (target_shape[1] - 1) - 1
+        zv = zv * 2 / (target_shape[0] - 1) - 1
+        yv = yv * 2 / (target_shape[1] - 1) - 1
+        xv = xv * 2 / (target_shape[2] - 1) - 1
     else:
-        yv = (yv.T * 2 + 1) / target_shape[0] - 1
-        xv = (xv.T * 2 + 1) / target_shape[1] - 1
+        zv = (zv * 2 + 1) / target_shape[0] - 1
+        yv = (yv * 2 + 1) / target_shape[1] - 1
+        xv = (xv * 2 + 1) / target_shape[2] - 1
     ones = np.ones_like(xv)
-    grid = np.stack([xv, yv, ones]).reshape(3, -1)
-    return data.reshape(-1, 3).dot(grid).reshape(data.shape[0], 2, *target_shape)
+    grid = np.stack([xv, yv, zv, ones]).reshape(4, -1)
+    return data.reshape(-1, 4).dot(grid).reshape(data.shape[0], 3, *target_shape)
 
 
 def grid_sample_2d(

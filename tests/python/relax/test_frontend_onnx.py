@@ -5585,6 +5585,36 @@ def test_affine_grid(align_corners):
     check_correctness(model, opset=20)
 
 
+@pytest.mark.parametrize("align_corners", [None, 0, 1])
+def test_affine_grid_3d(align_corners):
+    node_attrs = {}
+    if align_corners is not None:
+        node_attrs["align_corners"] = align_corners
+    affine_grid_node = helper.make_node(
+        "AffineGrid",
+        ["theta", "size"],
+        ["grid"],
+        **node_attrs,
+    )
+
+    graph = helper.make_graph(
+        [affine_grid_node],
+        "affine_grid_3d_test",
+        inputs=[
+            helper.make_tensor_value_info("theta", TensorProto.FLOAT, [2, 3, 4]),
+        ],
+        initializer=[
+            helper.make_tensor("size", TensorProto.INT64, [5], [2, 3, 4, 5, 6]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("grid", TensorProto.FLOAT, [2, 4, 5, 6, 3]),
+        ],
+    )
+
+    model = helper.make_model(graph, producer_name="affine_grid_3d_test")
+    check_correctness(model, opset=20)
+
+
 @pytest.mark.parametrize("mode", ["bilinear", "nearest", "bicubic"])
 @pytest.mark.parametrize("padding_mode", ["zeros", "border", "reflection"])
 @pytest.mark.parametrize("align_corners", [0, 1])

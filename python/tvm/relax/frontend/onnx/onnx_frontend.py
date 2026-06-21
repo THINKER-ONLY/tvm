@@ -3319,8 +3319,8 @@ class AffineGrid(OnnxOpConverter):
 
     @classmethod
     def _impl_v20(cls, bb, inputs, attr, params):
-        theta = inputs[0]  # [N, 2, 3] for 2D
-        size = get_constant(inputs[1], params)  # [N, C, H, W] for 2D
+        theta = inputs[0]  # [N, 2, 3] for 2D or [N, 3, 4] for 3D
+        size = get_constant(inputs[1], params)  # [N, C, H, W] or [N, C, D, H, W]
         align_corners = bool(attr.get("align_corners", 0))
 
         # Extract size values
@@ -3331,17 +3331,17 @@ class AffineGrid(OnnxOpConverter):
         else:
             raise NotImplementedError(f"Dynamic size of type {type(size)} is not supported")
 
-        # Only 2D is supported: size = [N, C, H, W]
-        if len(size_vals) != 4:
-            raise ValueError("Only 2D AffineGrid (size=[N,C,H,W]) is supported")
-        target_h, target_w = size_vals[2], size_vals[3]
+        if len(size_vals) == 4:
+            target_shape = (size_vals[2], size_vals[3])
+            permute_axes = [0, 2, 3, 1]
+        elif len(size_vals) == 5:
+            target_shape = (size_vals[2], size_vals[3], size_vals[4])
+            permute_axes = [0, 2, 3, 4, 1]
+        else:
+            raise ValueError("AffineGrid only supports 2D size=[N,C,H,W] or 3D size=[N,C,D,H,W]")
 
-        # Relax affine_grid outputs [N, 2, H, W]
-        grid = bb.emit(
-            relax.op.image.affine_grid(theta, (target_h, target_w), align_corners=align_corners)
-        )
-        # Permute to ONNX convention [N, H, W, 2]
-        return bb.emit(relax.op.permute_dims(grid, axes=[0, 2, 3, 1]))
+        grid = bb.emit(relax.op.image.affine_grid(theta, target_shape, align_corners=align_corners))
+        return bb.emit(relax.op.permute_dims(grid, axes=permute_axes))
 
 
 class Einsum(OnnxOpConverter):

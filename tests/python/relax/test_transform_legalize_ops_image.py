@@ -174,6 +174,42 @@ def test_image_affine_grid_align_corners_false():
     tvm.ir.assert_structural_equal(mod, Expected)
 
 
+def test_image_affine_grid_3d():
+    # fmt: off
+    @tvm.script.ir_module
+    class AffineGrid:
+        @R.function
+        def main(theta: R.Tensor((2, 3, 4), "float32")) -> R.Tensor((2, 3, 4, 5, 6), "float32"):
+            gv: R.Tensor((2, 3, 4, 5, 6), "float32") = R.image.affine_grid(theta, size=(4, 5, 6), align_corners=False)
+            return gv
+
+    @tvm.script.ir_module
+    class Expected:
+        @R.function
+        def main(theta: R.Tensor((2, 3, 4), "float32")) -> R.Tensor((2, 3, 4, 5, 6), "float32"):
+            gv = R.call_tir(Expected.affine_grid, (theta,), R.Tensor((2, 3, 4, 5, 6), dtype="float32"))
+            return gv
+
+        @T.prim_func(private=True, s_tir=True)
+        def affine_grid(var_theta: T.handle, var_compute: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            theta = T.match_buffer(var_theta, (T.int64(2), T.int64(3), T.int64(4)))
+            compute = T.match_buffer(var_compute, (T.int64(2), T.int64(3), T.int64(4), T.int64(5), T.int64(6)))
+            with T.sblock("root"):
+                T.reads()
+                T.writes()
+                for n, dim, k, i, j in T.grid(T.int64(2), T.int64(3), T.int64(4), T.int64(5), T.int64(6)):
+                    with T.sblock("compute"):
+                        v_n, v_dim, v_k, v_i, v_j = T.axis.remap("SSSSS", [n, dim, k, i, j])
+                        T.reads(theta[v_n, v_dim, T.int64(0):T.int64(4)])
+                        T.writes(compute[v_n, v_dim, v_k, v_i, v_j])
+                        compute[v_n, v_dim, v_k, v_i, v_j] = theta[v_n, v_dim, T.int64(0)] * (T.float32(-0.8333333333333334) + T.Cast("float32", v_j) * T.float32(0.3333333333333333)) + theta[v_n, v_dim, T.int64(1)] * (T.float32(-0.8) + T.Cast("float32", v_i) * T.float32(0.4)) + theta[v_n, v_dim, T.int64(2)] * (T.float32(-0.75) + T.Cast("float32", v_k) * T.float32(0.5)) + theta[v_n, v_dim, T.int64(3)]
+    # fmt: on
+
+    mod = LegalizeOps()(AffineGrid)
+    tvm.ir.assert_structural_equal(mod, Expected)
+
+
 def test_image_resize3d():
     # fmt: off
     @tvm.script.ir_module

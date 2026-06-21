@@ -239,7 +239,7 @@ def affine_grid(
     size: Expr | SizeLike,
     align_corners: bool = True,
 ) -> Expr:
-    """Generate a 2D sampling grid using an affine transformation matrix.
+    """Generate a 2D or 3D sampling grid using an affine transformation matrix.
 
     This operation is described in https://arxiv.org/pdf/1506.02025.pdf.
     It generates a uniform sampling grid within the target shape, normalizes it
@@ -248,11 +248,12 @@ def affine_grid(
     Parameters
     ----------
     data : relax.Expr
-        The input affine matrix tensor with shape [batch, 2, 3].
+        The input affine matrix tensor with shape [batch, 2, 3] or [batch, 3, 4].
 
-    size : Union[Expr, PrimExprLike, Tuple[PrimExprLike, PrimExprLike]]
-        The target output spatial shape (H, W). If a single integer or PrimExpr
-        is provided, it is interpreted as a square output shape (size, size).
+    size : Union[Expr, PrimExprLike, Tuple[PrimExprLike, ...]]
+        The target output spatial shape (H, W) or (D, H, W). If a single integer
+        or PrimExpr is provided, it is interpreted as a square output shape
+        (size, size).
 
     align_corners : bool
         If true, -1 and 1 refer to the centers of the corner output pixels.
@@ -261,7 +262,7 @@ def affine_grid(
     Returns
     -------
     result : relax.Expr
-        The output grid tensor with shape [batch, 2, H, W].
+        The output grid tensor with shape [batch, 2, H, W] or [batch, 3, D, H, W].
     """
     if isinstance(size, int | PrimExpr):
         size = (size, size)
