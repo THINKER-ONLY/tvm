@@ -354,9 +354,14 @@ TVM_REGISTER_OP("relax.image.grid_sample")
 
 /* relax.image.affine_grid */
 
-Expr affine_grid(Expr data, Expr size) {
+TVM_FFI_STATIC_INIT_BLOCK() { AffineGridAttrs::RegisterReflection(); }
+
+Expr affine_grid(Expr data, Expr size, bool align_corners) {
+  ffi::ObjectPtr<AffineGridAttrs> attrs = ffi::make_object<AffineGridAttrs>();
+  attrs->align_corners = align_corners;
+
   static const Op& op = Op::Get("relax.image.affine_grid");
-  return Call(op, {std::move(data), std::move(size)}, Attrs(), {});
+  return Call(op, {std::move(data), std::move(size)}, Attrs(attrs), {});
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -374,6 +379,8 @@ StructInfo InferStructInfoAffineGrid(const Call& call, const BlockBuilder& ctx) 
   const auto* data_sinfo = GetStructInfoAs<TensorStructInfoNode>(call->args[0]);
   const auto* size_sinfo = GetStructInfoAs<ShapeStructInfoNode>(call->args[1]);
   const auto* size_value = call->args[1].as<ShapeExprNode>();
+  const auto* attrs = call->attrs.as<AffineGridAttrs>();
+  TVM_FFI_ICHECK(attrs) << "Invalid Call";
 
   if (data_sinfo == nullptr) {
     TVM_FFI_VISIT_THROW(TypeError, call)
@@ -435,6 +442,7 @@ StructInfo InferStructInfoAffineGrid(const Call& call, const BlockBuilder& ctx) 
 }
 
 TVM_REGISTER_OP("relax.image.affine_grid")
+    .set_attrs_type<AffineGridAttrs>()
     .set_num_inputs(2)
     .add_argument("data", "Tensor", "The input affine matrix tensor.")
     .add_argument("size", "Shape", "The target output shape (H, W).")
